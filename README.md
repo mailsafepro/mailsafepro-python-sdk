@@ -2,10 +2,12 @@
 
 Official Python SDK for the **MailSafePro Email Validation API** with comprehensive security features including spam trap detection, breach checking, role email detection, and advanced SMTP/DNS validation.
 
-[![PyPI version](https://badge.fury.io/py/MailSafePro-sdk.svg)](https://pypi.org/project/mailsafepro-sdk/)
+[![PyPI version](https://badge.fury.io/py/mailsafepro-sdk.svg)](https://pypi.org/project/mailsafepro-sdk/)
 [![Python versions](https://img.shields.io/pypi/pyversions/mailsafepro-sdk.svg)](https://pypi.org/project/mailsafepro-sdk/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Downloads](https://pepy.tech/badge/mailsafepro-sdk)](https://pepy.tech/project/mailsafepro-sdk)
+[![Downloads](https://static.pepy.tech/badge/mailsafepro-sdk)](https://pepy.tech/project/mailsafepro-sdk)
+[![GitHub release](https://img.shields.io/github/v/release/mailsafepro/mailsafepro-python-sdk)](https://github.com/mailsafepro/mailsafepro-python-sdk/releases)
+[![GitHub stars](https://img.shields.io/github/stars/mailsafepro/mailsafepro-python-sdk?style=social)](https://github.com/mailsafepro/mailsafepro-python-sdk)
 
 
 ## 🚀 Features
