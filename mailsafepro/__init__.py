@@ -24,7 +24,7 @@ from .models import (
     Metadata,
 )
 from .exceptions import (
-    MailSafeProError,
+    EmailValidatorError,
     AuthenticationError,
     RateLimitError,
     ValidationError,
@@ -49,7 +49,7 @@ __all__ = [
     "BreachInfo",
     "SuggestedFixes",
     "Metadata",
-    "MailSafeProError",
+    "EmailValidatorError",
     "AuthenticationError",
     "RateLimitError",
     "ValidationError",
