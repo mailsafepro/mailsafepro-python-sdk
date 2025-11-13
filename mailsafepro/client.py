@@ -440,7 +440,7 @@ class MailSafePro:
             "concurrent_requests": concurrent_requests,
         }
         
-        data = self._make_request("POST", "/v1/batch", json=payload)
+        data = self._make_request("POST", "/batch", json=payload)
         return BatchResult.from_dict(data)
     
     def validate_file(
@@ -495,7 +495,7 @@ class MailSafePro:
             
             response_data = self._make_request(
                 "POST",
-                "/v1/batch/upload",
+                "/batch/upload",
                 files=files,
                 data=data_params,
                 headers=headers,
