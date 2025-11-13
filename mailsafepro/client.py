@@ -13,7 +13,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .exceptions import (
-    MailSafeProError,
+    EmailValidatorError,
     AuthenticationError,
     RateLimitError,
     ValidationError,
@@ -286,7 +286,7 @@ class MailSafePro:
             Response data as dictionary
         
         Raises:
-            Various MailSafeProError subclasses
+            Various EmailValidatorError subclasses
         """
         url = f"{self.base_url}{endpoint}"
         headers = {**self._get_auth_headers(), **kwargs.pop("headers", {})}
@@ -346,7 +346,7 @@ class MailSafePro:
             if isinstance(e, requests.exceptions.HTTPError):
                 # Already handled above
                 raise
-            raise MailSafeProError(f"Request failed: {str(e)}") from e
+            raise EmailValidatorError(f"Request failed: {str(e)}") from e
     
     def validate(
         self,
@@ -390,7 +390,7 @@ class MailSafePro:
             "priority": priority,
         }
         
-        data = self._make_request("POST", "/v1/validate", json=payload)
+        data = self._make_request("POST", "/validate/email", json=payload)
         return ValidationResult.from_dict(data)
     
     def validate_batch(

@@ -19,7 +19,7 @@ def main():
     api_key = "key_your_api_key_here"
     
     try:
-        client = MailSafePro(api_key=api_key)
+        client = MailSafePro(api_key=api_key, base_url="http://localhost:8000")
         print("✓ Client initialized successfully\n")
     except AuthenticationError as e:
         print(f"❌ Authentication failed: {e}")
