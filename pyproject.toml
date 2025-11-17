@@ -1,6 +1,6 @@
 [project]
 name = "mailsafepro-sdk"
-version = "1.0.0"
+version = "1.0.2"
 description = "Official Python SDK for Email Validation API with comprehensive security features"
 authors = [
     {name = "MailSafePro Team", email = "support@mailsafepro.com"}

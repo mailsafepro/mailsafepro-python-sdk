@@ -10,7 +10,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="mailsafepro-sdk",
-    version="1.0.0",
+    version="1.0.2",
     author="MailSafePro Team",
     author_email="support@mailsafepro.com",
     description="Official Python SDK for Email Validation API",
