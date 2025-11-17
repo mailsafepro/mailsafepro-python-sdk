@@ -14,7 +14,7 @@ Thank you for your interest in contributing to the MailSafePro Python SDK! 🎉
 1. **Fork and clone the repository**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/mailsafepro-python-sdk.git
+git clone https://github.com/mailsafepro/mailsafepro-python-sdk.git
 cd mailsafepro-python-sdk
 ```
 

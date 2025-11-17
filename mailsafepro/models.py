@@ -10,11 +10,12 @@ from typing import List, Optional, Dict, Any
 @dataclass
 class DNSRecordSPF:
     """SPF DNS record information"""
+
     status: Optional[str] = None
     record: Optional[str] = None
     mechanism: Optional[str] = None
     domain: Optional[str] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "DNSRecordSPF":
         return cls(
@@ -28,12 +29,13 @@ class DNSRecordSPF:
 @dataclass
 class DNSRecordDKIM:
     """DKIM DNS record information"""
+
     status: Optional[str] = None
     selector: Optional[str] = None
     key_type: Optional[str] = None
     key_length: Optional[int] = None
     record: Optional[str] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "DNSRecordDKIM":
         return cls(
@@ -48,11 +50,12 @@ class DNSRecordDKIM:
 @dataclass
 class DNSRecordDMARC:
     """DMARC DNS record information"""
+
     status: Optional[str] = None
     policy: Optional[str] = None
     record: Optional[str] = None
     pct: Optional[int] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "DNSRecordDMARC":
         return cls(
@@ -66,12 +69,13 @@ class DNSRecordDMARC:
 @dataclass
 class DNSInfo:
     """Comprehensive DNS information for email validation"""
+
     spf: Optional[DNSRecordSPF] = None
     dkim: Optional[DNSRecordDKIM] = None
     dmarc: Optional[DNSRecordDMARC] = None
     mx_records: List[str] = field(default_factory=list)
     ns_records: List[str] = field(default_factory=list)
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "DNSInfo":
         return cls(
@@ -86,6 +90,7 @@ class DNSInfo:
 @dataclass
 class SMTPInfo:
     """SMTP verification results"""
+
     checked: bool
     mailbox_exists: Optional[bool] = None
     mx_server: Optional[str] = None
@@ -93,7 +98,7 @@ class SMTPInfo:
     error_message: Optional[str] = None
     skip_reason: Optional[str] = None
     detail: Optional[str] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SMTPInfo":
         return cls(
@@ -110,10 +115,11 @@ class SMTPInfo:
 @dataclass
 class ProviderAnalysis:
     """Email provider analysis"""
+
     provider: str
     reputation: float
     fingerprint: Optional[str] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ProviderAnalysis":
         return cls(
@@ -126,13 +132,14 @@ class ProviderAnalysis:
 @dataclass
 class SecurityInfo:
     """Security breach information"""
+
     in_breach: bool
     breach_count: int = 0
     risk_level: Optional[str] = None
     checked_at: Optional[str] = None
     cached: bool = False
     recent_breaches: List[str] = field(default_factory=list)
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SecurityInfo":
         return cls(
@@ -148,13 +155,14 @@ class SecurityInfo:
 @dataclass
 class SpamTrapCheck:
     """Spam trap detection results"""
+
     checked: bool
     is_spam_trap: bool
     confidence: float
     trap_type: str
     source: str
     details: str
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SpamTrapCheck":
         return cls(
@@ -170,11 +178,12 @@ class SpamTrapCheck:
 @dataclass
 class RoleEmailInfo:
     """Role email detection results"""
+
     is_role_email: bool
     role_type: Optional[str] = None
     deliverability_risk: Optional[str] = None
     confidence: float = 0.0
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "RoleEmailInfo":
         return cls(
@@ -188,13 +197,14 @@ class RoleEmailInfo:
 @dataclass
 class BreachInfo:
     """Data breach information (PREMIUM/ENTERPRISE)"""
+
     in_breach: bool
     breach_count: int = 0
     risk_level: Optional[str] = None
     checked_at: Optional[str] = None
     cached: bool = False
     recent_breaches: List[str] = field(default_factory=list)
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "BreachInfo":
         return cls(
@@ -210,11 +220,12 @@ class BreachInfo:
 @dataclass
 class SuggestedFixes:
     """Suggested email fixes for typos"""
+
     typo_detected: bool
     suggested_email: Optional[str] = None
     confidence: float = 0.0
     reason: Optional[str] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SuggestedFixes":
         return cls(
@@ -228,11 +239,12 @@ class SuggestedFixes:
 @dataclass
 class Metadata:
     """Validation metadata"""
+
     timestamp: str
     validation_id: str
     cache_used: bool
     client_plan: str = "UNKNOWN"
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Metadata":
         return cls(
@@ -247,7 +259,7 @@ class Metadata:
 class ValidationResult:
     """
     Comprehensive email validation result
-    
+
     Attributes:
         email: Validated email address
         valid: Overall validation result (True/False)
@@ -267,6 +279,7 @@ class ValidationResult:
         suggested_fixes: Typo correction suggestions
         metadata: Validation metadata
     """
+
     email: str
     valid: bool
     detail: str
@@ -284,7 +297,7 @@ class ValidationResult:
     breach_info: Optional[BreachInfo] = None
     suggested_fixes: Optional[SuggestedFixes] = None
     metadata: Optional[Metadata] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ValidationResult":
         """Create ValidationResult from API response dictionary"""
@@ -301,29 +314,23 @@ class ValidationResult:
             provider_analysis=ProviderAnalysis.from_dict(
                 data.get("provider_analysis") or data.get("provideranalysis", {})
             ),
-            smtp=SMTPInfo.from_dict(
-                data.get("smtp_validation") or data.get("smtpvalidation") or data.get("smtp", {})
-            ),
-            dns_security=DNSInfo.from_dict(
-                data.get("dns_security") or data.get("dnssecurity", {})
-            ) if data.get("dns_security") or data.get("dnssecurity") else None,
-            spam_trap_check=SpamTrapCheck.from_dict(
-                data.get("spam_trap_check") or data.get("spamtrapcheck", {})
-            ) if data.get("spam_trap_check") or data.get("spamtrapcheck", {}).get("checked") else None,
-            role_email_info=RoleEmailInfo.from_dict(
-                data.get("email_type") or data.get("emailtype", {})
-            ) if data.get("email_type") or data.get("emailtype") else None,
-            breach_info=BreachInfo.from_dict(
-                data.get("security") or {}
-            ) if data.get("security") else None,
-            suggested_fixes=SuggestedFixes.from_dict(
-                data.get("suggested_fixes") or data.get("suggestedfixes", {})
-            ) if data.get("suggested_fixes") or data.get("suggestedfixes") else None,
-            metadata=Metadata.from_dict(
-                data.get("metadata", {})
-            ) if data.get("metadata") else None,
+            smtp=SMTPInfo.from_dict(data.get("smtp_validation") or data.get("smtpvalidation") or data.get("smtp", {})),
+            dns_security=DNSInfo.from_dict(data.get("dns_security") or data.get("dnssecurity", {}))
+            if data.get("dns_security") or data.get("dnssecurity")
+            else None,
+            spam_trap_check=SpamTrapCheck.from_dict(data.get("spam_trap_check") or data.get("spamtrapcheck", {}))
+            if data.get("spam_trap_check") or data.get("spamtrapcheck", {}).get("checked")
+            else None,
+            role_email_info=RoleEmailInfo.from_dict(data.get("email_type") or data.get("emailtype", {}))
+            if data.get("email_type") or data.get("emailtype")
+            else None,
+            breach_info=BreachInfo.from_dict(data.get("security") or {}) if data.get("security") else None,
+            suggested_fixes=SuggestedFixes.from_dict(data.get("suggested_fixes") or data.get("suggestedfixes", {}))
+            if data.get("suggested_fixes") or data.get("suggestedfixes")
+            else None,
+            metadata=Metadata.from_dict(data.get("metadata", {})) if data.get("metadata") else None,
         )
-    
+
     def __repr__(self) -> str:
         return (
             f"<ValidationResult(email={self.email!r}, valid={self.valid}, "
@@ -335,7 +342,7 @@ class ValidationResult:
 class BatchResult:
     """
     Batch validation results
-    
+
     Attributes:
         count: Total emails processed
         valid_count: Number of valid emails
@@ -345,6 +352,7 @@ class BatchResult:
         results: List of individual validation results
         summary: Batch summary with additional statistics
     """
+
     count: int
     valid_count: int
     invalid_count: int
@@ -352,13 +360,13 @@ class BatchResult:
     average_time: float
     results: List[ValidationResult]
     summary: Optional[Dict[str, Any]] = None
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "BatchResult":
         """Create BatchResult from API response dictionary"""
         results_data = data.get("results", [])
         results = [ValidationResult.from_dict(r) for r in results_data]
-        
+
         return cls(
             count=data.get("count", len(results)),
             valid_count=data.get("valid_count") or data.get("validcount", 0),
@@ -368,9 +376,6 @@ class BatchResult:
             results=results,
             summary=data.get("summary"),
         )
-    
+
     def __repr__(self) -> str:
-        return (
-            f"<BatchResult(count={self.count}, valid={self.valid_count}, "
-            f"invalid={self.invalid_count})>"
-        )
+        return f"<BatchResult(count={self.count}, valid={self.valid_count}, " f"invalid={self.invalid_count})>"

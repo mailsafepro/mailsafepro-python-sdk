@@ -1,13 +1,24 @@
 # MailSafePro SDK for Python
 
-Official Python SDK for the **MailSafePro Email Validation API** with comprehensive security features including spam trap detection, breach checking, role email detection, and advanced SMTP/DNS validation.
-
+[![Tests](https://github.com/mailsafepro/mailsafepro-python-sdk/workflows/Tests/badge.svg)](https://github.com/mailsafepro/mailsafepro-python-sdk/actions)
 [![PyPI version](https://badge.fury.io/py/mailsafepro-sdk.svg)](https://pypi.org/project/mailsafepro-sdk/)
 [![Python versions](https://img.shields.io/pypi/pyversions/mailsafepro-sdk.svg)](https://pypi.org/project/mailsafepro-sdk/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 [![Downloads](https://static.pepy.tech/badge/mailsafepro-sdk)](https://pepy.tech/project/mailsafepro-sdk)
-[![GitHub release](https://img.shields.io/github/v/release/mailsafepro/mailsafepro-python-sdk)](https://github.com/mailsafepro/mailsafepro-python-sdk/releases)
-[![GitHub stars](https://img.shields.io/github/stars/mailsafepro/mailsafepro-python-sdk?style=social)](https://github.com/mailsafepro/mailsafepro-python-sdk)
+
+Official Python SDK for the **MailSafePro Email Validation API** with comprehensive security features including spam trap detection, breach checking, role email detection, and advanced SMTP/DNS validation.
+
+## ✨ Features
+
+- 🔐 **Dual Authentication**: API Key and JWT support
+- 📧 **Comprehensive Validation**: Format, DNS, SMTP, deliverability
+- 🚫 **Security Checks**: Spam trap, breach detection, disposable emails
+- 📊 **Batch Processing**: Validate up to 10,000 emails at once
+- ⚡ **Fast & Reliable**: Auto-retry with exponential backoff
+- 🎯 **Type Safe**: Full type hints for better IDE support
+- 📦 **Easy Integration**: Simple, intuitive API
 
 
 ## 🚀 Features
