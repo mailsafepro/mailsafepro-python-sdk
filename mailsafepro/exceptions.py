@@ -5,13 +5,13 @@ Custom exceptions for EmailValidator SDK
 
 class EmailValidatorError(Exception):
     """Base exception for all EmailValidator errors"""
-
-    pass
+    def __init__(self, message: str, request_id: str = None):
+        super().__init__(message)
+        self.request_id = request_id
 
 
 class AuthenticationError(EmailValidatorError):
     """Raised when authentication fails (401/403)"""
-
     pass
 
 
@@ -25,13 +25,11 @@ class RateLimitError(EmailValidatorError):
 
 class ValidationError(EmailValidatorError):
     """Raised when validation request is invalid (422)"""
-
     pass
 
 
 class QuotaExceededError(EmailValidatorError):
     """Raised when daily quota is exceeded"""
-
     pass
 
 
@@ -45,5 +43,4 @@ class ServerError(EmailValidatorError):
 
 class NetworkError(EmailValidatorError):
     """Raised when network-related errors occur"""
-
     pass

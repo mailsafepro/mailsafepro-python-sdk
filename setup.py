@@ -38,8 +38,8 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        "requests>=2.31.0",
-        "urllib3>=2.0.0",
+        "httpx>=0.24.0",
+        "pydantic>=2.0.0",
     ],
     extras_require={
         "dev": [

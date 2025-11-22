@@ -1,16 +1,16 @@
 """
-MailSafePro Client - Main API client with authentication support
+MailSafePro Client - Main API client with authentication support (Sync & Async)
 """
 
 import logging
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Type, TypeVar, Generator, AsyncGenerator
+from dataclasses import dataclass
 
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import httpx
+from pydantic import ValidationError as PydanticValidationError
 
 from .exceptions import (
     EmailValidatorError,
@@ -21,100 +21,158 @@ from .exceptions import (
     ServerError,
     NetworkError,
 )
-from .models import ValidationResult, BatchResult
+from .models import (
+    ValidationResult,
+    BatchResult,
+    UsageStats,
+)
 from .utils import validate_email_format, validate_file_path
-
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T")
 
-class MailSafePro:
-    """
-    Official Python SDK for Email Validation API
 
-    Supports two authentication modes:
-    1. API Key (static): MailSafePro(api_key="key_xxx")
-    2. JWT (dynamic): MailSafePro.login(username="user@example.com", password="***")
+@dataclass
+class ClientConfig:
+    """Configuration for MailSafePro Client"""
+    api_key: Optional[str] = None
+    base_url: str = "https://api.mailsafepro.com"
+    timeout: int = 30
+    max_retries: int = 3
+    enable_logging: bool = False
 
-    Args:
-        api_key: API key for authentication (optional if using JWT)
-        base_url: Base URL of the API (default: production)
-        timeout: Request timeout in seconds (default: 30)
-        max_retries: Maximum number of retries for failed requests (default: 3)
-        enable_logging: Enable debug logging (default: False)
 
-    Examples:
-        >>> # API Key authentication
-        >>> validator = MailSafePro(api_key="key_xxx")
-        >>> result = validator.validate("user@example.com")
-        >>> print(result.valid)
+class BaseClient:
+    """Base client with shared logic for Sync and Async clients"""
 
-        >>> # JWT authentication
-        >>> validator = MailSafePro.login(
-        ...     username="user@example.com",
-        ...     password="your_password"
-        ... )
-        >>> result = validator.validate("test@example.com", check_smtp=True)
-    """
+    USER_AGENT = "MailSafePro-Python-SDK/2.1.0"
 
-    DEFAULT_BASE_URL = "https://api.mailsafepro.com"
-    USER_AGENT = "MailSafePro-Python-SDK/1.0.0"
-
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        timeout: int = 30,
-        max_retries: int = 3,
-        enable_logging: bool = False,
-    ):
-        """Initialize MailSafePro client with API key"""
-        self.base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
-        self.timeout = timeout
-        self.max_retries = max_retries
-        self._api_key = api_key
+    def __init__(self, config: Optional[ClientConfig] = None, **kwargs):
+        if config is None:
+            config = ClientConfig(**kwargs)
+        
+        self.config = config
+        self.base_url = config.base_url.rstrip("/")
+        self._api_key = config.api_key
 
         # JWT token management
         self._access_token: Optional[str] = None
         self._refresh_token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
 
-        # Setup logging
-        if enable_logging:
+        if config.enable_logging:
             logging.basicConfig(level=logging.DEBUG)
             logger.setLevel(logging.DEBUG)
 
-        # Setup session with retry strategy
-        self._session = self._create_session()
-
         logger.debug(f"MailSafePro initialized: base_url={self.base_url}")
 
-    def _create_session(self) -> requests.Session:
-        """Create requests session with retry strategy and exponential backoff"""
-        session = requests.Session()
+    @property
+    def timeout(self) -> int:
+        return self.config.timeout
 
-        # Retry on 429 (rate limit), 500, 502, 503, 504
-        retry_strategy = Retry(
-            total=self.max_retries,
-            backoff_factor=1,  # 1s, 2s, 4s
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET", "POST", "PUT", "DELETE"],
+    @property
+    def max_retries(self) -> int:
+        return self.config.max_retries
+
+    def _get_auth_headers(self) -> Dict[str, str]:
+        """Get authentication headers (API Key or JWT)"""
+        headers = {
+            "User-Agent": self.USER_AGENT,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+        if self._access_token:
+            headers["Authorization"] = f"Bearer {self._access_token}"
+        elif self._api_key:
+            headers["X-API-Key"] = self._api_key
+
+        return headers
+
+    def _handle_response(self, response: httpx.Response) -> Dict[str, Any]:
+        """Handle HTTP response and raise exceptions if needed"""
+        request_id = response.headers.get("X-Request-ID")
+        
+        try:
+            response.raise_for_status()
+            if response.status_code == 204:
+                return {}
+            
+            data = response.json()
+            # Inject request_id into metadata if present in response structure
+            if isinstance(data, dict) and "metadata" in data:
+                if isinstance(data["metadata"], dict):
+                    data["metadata"]["request_id"] = request_id
+            
+            return data
+
+        except httpx.HTTPStatusError as e:
+            status_code = response.status_code
+            error_detail = "Unknown error"
+            try:
+                error_data = response.json()
+                error_detail = error_data.get("detail", str(e))
+            except Exception:
+                pass
+
+            if status_code == 401:
+                raise AuthenticationError(error_detail, request_id)
+            elif status_code == 403:
+                if "quota" in str(error_detail).lower() or "limit" in str(error_detail).lower():
+                    raise QuotaExceededError(error_detail, request_id)
+                raise AuthenticationError(error_detail, request_id)
+            elif status_code == 422:
+                raise ValidationError(error_detail, request_id)
+            elif status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 60))
+                raise RateLimitError(
+                    f"Rate limit exceeded. Retry after {retry_after} seconds",
+                    retry_after=retry_after,
+                )
+            elif status_code >= 500:
+                raise ServerError(f"Server error: {status_code}", status_code=status_code)
+            
+            raise EmailValidatorError(f"Request failed: {error_detail}", request_id) from e
+        except httpx.RequestError as e:
+            raise NetworkError(f"Network error: {str(e)}", request_id) from e
+        except Exception as e:
+            raise EmailValidatorError(f"Unexpected error: {str(e)}", request_id) from e
+
+    def _chunk_list(self, items: List[T], chunk_size: int) -> Generator[List[T], None, None]:
+        """Yield successive chunks from items."""
+        for i in range(0, len(items), chunk_size):
+            yield items[i : i + chunk_size]
+
+
+class MailSafePro(BaseClient):
+    """
+    Synchronous MailSafePro Client
+    """
+
+    def __init__(self, api_key: Optional[str] = None, **kwargs):
+        # Support both config object and direct kwargs
+        if "config" in kwargs:
+            super().__init__(kwargs["config"])
+        else:
+            # Filter out None values to let ClientConfig defaults take over
+            clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
+            super().__init__(ClientConfig(api_key=api_key, **clean_kwargs))
+            
+        self._client = httpx.Client(
+            base_url=self.base_url,
+            timeout=self.config.timeout,
+            transport=httpx.HTTPTransport(retries=self.config.max_retries),
         )
 
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
+    def __enter__(self):
+        return self
 
-        # Default headers
-        session.headers.update(
-            {
-                "User-Agent": self.USER_AGENT,
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            }
-        )
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
-        return session
+    def close(self):
+        self._client.close()
 
     @classmethod
     def login(
@@ -122,222 +180,43 @@ class MailSafePro:
         username: str,
         password: str,
         base_url: Optional[str] = None,
-        timeout: int = 30,
-        max_retries: int = 3,
-        enable_logging: bool = False,
+        **kwargs
     ) -> "MailSafePro":
-        """
-        Create MailSafePro instance with JWT authentication
-
-        Args:
-            username: User email address
-            password: User password
-            base_url: Base URL of the API
-            timeout: Request timeout in seconds
-            max_retries: Maximum number of retries
-            enable_logging: Enable debug logging
-
-        Returns:
-            MailSafePro instance with JWT tokens
-
-        Raises:
-            AuthenticationError: If login fails
-
-        Examples:
-            >>> validator = MailSafePro.login(
-            ...     username="user@example.com",
-            ...     password="secure_password"
-            ... )
-            >>> result = validator.validate("test@example.com")
-        """
-        instance = cls(
-            base_url=base_url,
-            timeout=timeout,
-            max_retries=max_retries,
-            enable_logging=enable_logging,
-        )
-
-        # Perform login
+        instance = cls(base_url=base_url, **kwargs)
         try:
-            url = f"{instance.base_url}/auth/login"
-            response = instance._session.post(
-                url,
+            response = instance._client.post(
+                "/auth/login",
                 json={"email": username, "password": password},
-                timeout=timeout,
             )
-
-            if response.status_code == 401:
-                raise AuthenticationError("Invalid credentials")
-
-            response.raise_for_status()
-            data = response.json()
-
+            data = instance._handle_response(response)
+            
             instance._access_token = data.get("access_token")
             instance._refresh_token = data.get("refresh_token")
-
-            # Calculate token expiration (default 15 minutes - 1 minute buffer)
             expires_in = data.get("expires_in", 900)
             instance._token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)
-
-            logger.info(f"Successfully logged in as {username}")
+            
             return instance
+        except Exception as e:
+            instance.close()
+            request_id = getattr(e, "request_id", None)
+            raise AuthenticationError(f"Login failed: {str(e)}", request_id) from e
 
-        except requests.exceptions.RequestException as e:
-            raise AuthenticationError(f"Login failed: {str(e)}") from e
-
-    def logout(self) -> None:
-        """
-        Logout and invalidate JWT session
-
-        Raises:
-            AuthenticationError: If not authenticated with JWT
-
-        Examples:
-            >>> validator = MailSafePro.login("user@example.com", "password")
-            >>> validator.logout()
-        """
-        if not self._access_token:
-            raise AuthenticationError("Not authenticated with JWT")
-
-        try:
-            headers = self._get_auth_headers()
-            url = f"{self.base_url}/auth/logout"
-
-            response = self._session.post(url, headers=headers, timeout=self.timeout)
-            response.raise_for_status()
-
-            # Clear tokens
-            self._access_token = None
-            self._refresh_token = None
-            self._token_expires_at = None
-
-            logger.info("Successfully logged out")
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Logout failed: {str(e)}")
-            # Still clear tokens even if logout request fails
-            self._access_token = None
-            self._refresh_token = None
-            self._token_expires_at = None
-
-    def _refresh_access_token(self) -> None:
-        """Refresh access token using refresh token"""
-        if not self._refresh_token:
-            raise AuthenticationError("No refresh token available")
-
-        try:
-            url = f"{self.base_url}/auth/refresh"
-            response = self._session.post(
-                url,
-                headers={"Authorization": f"Bearer {self._refresh_token}"},
-                timeout=self.timeout,
-            )
-
-            if response.status_code == 401:
-                raise AuthenticationError("Refresh token expired, please login again")
-
-            response.raise_for_status()
-            data = response.json()
-
-            self._access_token = data.get("access_token")
-            self._refresh_token = data.get("refresh_token")
-
-            expires_in = data.get("expires_in", 900)
-            self._token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)
-
-            logger.debug("Access token refreshed successfully")
-
-        except requests.exceptions.RequestException as e:
-            raise AuthenticationError(f"Token refresh failed: {str(e)}") from e
-
-    def _get_auth_headers(self) -> Dict[str, str]:
-        """Get authentication headers (API Key or JWT)"""
-        headers = {}
-
-        if self._access_token:
-            # Check if token needs refresh (1 minute before expiration)
-            if self._token_expires_at and datetime.now() >= self._token_expires_at:
-                logger.debug("Token expired, refreshing...")
-                self._refresh_access_token()
-
-            headers["Authorization"] = f"Bearer {self._access_token}"
-
-        elif self._api_key:
-            headers["X-API-Key"] = self._api_key
-
-        else:
-            raise AuthenticationError("No authentication method configured")
-
-        return headers
-
-    def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
-        """
-        Make HTTP request with error handling and retries
-
-        Args:
-            method: HTTP method (GET, POST, etc.)
-            endpoint: API endpoint path
-            **kwargs: Additional arguments for requests
-
-        Returns:
-            Response data as dictionary
-
-        Raises:
-            Various EmailValidatorError subclasses
-        """
-        url = f"{self.base_url}{endpoint}"
-        headers = {**self._get_auth_headers(), **kwargs.pop("headers", {})}
-
-        try:
-            logger.debug(f"{method} {url}")
-            response = self._session.request(
-                method, url, headers=headers, timeout=kwargs.pop("timeout", self.timeout), **kwargs
-            )
-
-            # Handle rate limiting
-            if response.status_code == 429:
-                retry_after = int(response.headers.get("Retry-After", 60))
-                raise RateLimitError(
-                    f"Rate limit exceeded. Retry after {retry_after} seconds",
-                    retry_after=retry_after,
+    def _refresh_token_if_needed(self):
+        if self._access_token and self._token_expires_at and datetime.now() >= self._token_expires_at:
+            if not self._refresh_token:
+                raise AuthenticationError("No refresh token available")
+            try:
+                response = self._client.post(
+                    "/auth/refresh",
+                    headers={"Authorization": f"Bearer {self._refresh_token}"}
                 )
-
-            # Handle authentication errors
-            if response.status_code in (401, 403):
-                raise AuthenticationError(response.json().get("detail", "Authentication failed"))
-
-            # Handle validation errors
-            if response.status_code == 422:
-                error_detail = response.json().get("detail", "Validation error")
-                raise ValidationError(error_detail)
-
-            # Handle quota exceeded
-            if response.status_code == 403:
-                error_detail = response.json().get("detail", "")
-                if "quota" in error_detail.lower() or "limit" in error_detail.lower():
-                    raise QuotaExceededError(error_detail)
-
-            # Handle server errors
-            if response.status_code >= 500:
-                raise ServerError(
-                    f"Server error: {response.status_code}",
-                    status_code=response.status_code,
-                )
-
-            response.raise_for_status()
-            return response.json()
-
-        except requests.exceptions.Timeout as e:
-            raise NetworkError(f"Request timeout: {str(e)}") from e
-
-        except requests.exceptions.ConnectionError as e:
-            raise NetworkError(f"Connection error: {str(e)}") from e
-
-        except requests.exceptions.RequestException as e:
-            if isinstance(e, requests.exceptions.HTTPError):
-                # Already handled above
-                raise
-            raise EmailValidatorError(f"Request failed: {str(e)}") from e
+                data = self._handle_response(response)
+                self._access_token = data.get("access_token")
+                self._refresh_token = data.get("refresh_token")
+                expires_in = data.get("expires_in", 900)
+                self._token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)
+            except Exception as e:
+                raise AuthenticationError(f"Token refresh failed: {str(e)}") from e
 
     def validate(
         self,
@@ -346,43 +225,23 @@ class MailSafePro:
         include_raw_dns: bool = False,
         priority: str = "standard",
     ) -> ValidationResult:
-        """
-        Validate a single email address
-
-        Args:
-            email: Email address to validate
-            check_smtp: Perform SMTP mailbox verification (requires PREMIUM plan)
-            include_raw_dns: Include raw DNS records in response (requires PREMIUM plan)
-            priority: Validation priority level ("low", "standard", "high")
-
-        Returns:
-            ValidationResult object with validation details
-
-        Raises:
-            ValidationError: If email format is invalid
-            QuotaExceededError: If daily quota is exceeded
-            AuthenticationError: If authentication fails
-
-        Examples:
-            >>> validator = MailSafePro(api_key="key_xxx")
-            >>> result = validator.validate("user@example.com")
-            >>> print(f"Valid: {result.valid}, Risk: {result.risk_score}")
-
-            >>> # With SMTP check (PREMIUM)
-            >>> result = validator.validate("user@example.com", check_smtp=True)
-            >>> print(f"Mailbox exists: {result.smtp.mailbox_exists}")
-        """
+        self._refresh_token_if_needed()
         validate_email_format(email)
-
+        
         payload = {
             "email": email,
             "check_smtp": check_smtp,
             "include_raw_dns": include_raw_dns,
             "priority": priority,
         }
-
-        data = self._make_request("POST", "/validate/email", json=payload)
-        return ValidationResult.from_dict(data)
+        
+        response = self._client.post(
+            "/validate/email",
+            json=payload,
+            headers=self._get_auth_headers()
+        )
+        data = self._handle_response(response)
+        return ValidationResult.model_validate(data)
 
     def validate_batch(
         self,
@@ -392,36 +251,41 @@ class MailSafePro:
         batch_size: int = 100,
         concurrent_requests: int = 5,
     ) -> BatchResult:
-        """
-        Validate multiple email addresses in batch
-
-        Args:
-            emails: List of email addresses to validate (max 10,000)
-            check_smtp: Perform SMTP verification for all emails
-            include_raw_dns: Include raw DNS records in responses
-            batch_size: Number of emails per batch (1-1000)
-            concurrent_requests: Maximum concurrent validation requests (1-50)
-
-        Returns:
-            BatchResult object with validation results
-
-        Raises:
-            ValidationError: If batch is invalid or too large
-            QuotaExceededError: If daily quota is exceeded
-
-        Examples:
-            >>> validator = MailSafePro(api_key="key_xxx")
-            >>> emails = ["user1@example.com", "user2@example.com"]
-            >>> result = validator.validate_batch(emails)
-            >>> print(f"Valid: {result.valid_count}/{result.count}")
-            >>> for res in result.results:
-            ...     print(f"{res.email}: {res.valid}")
-        """
+        self._refresh_token_if_needed()
         if not emails:
             raise ValidationError("Email list cannot be empty")
 
-        if len(emails) > 10000:
-            raise ValidationError("Cannot process more than 10,000 emails in a single batch")
+        MAX_BATCH_SIZE = 10000
+        
+        # Auto-chunking logic
+        if len(emails) > MAX_BATCH_SIZE:
+            logger.info(f"Input list size ({len(emails)}) exceeds limit ({MAX_BATCH_SIZE}). Auto-chunking...")
+            all_results = []
+            total_processed = 0
+            total_valid = 0
+            total_invalid = 0
+            start_time = time.time()
+            
+            for chunk in self._chunk_list(emails, MAX_BATCH_SIZE):
+                chunk_result = self.validate_batch(
+                    chunk, check_smtp, include_raw_dns, batch_size, concurrent_requests
+                )
+                all_results.extend(chunk_result.results)
+                total_processed += chunk_result.count
+                total_valid += chunk_result.valid_count
+                total_invalid += chunk_result.invalid_count
+                
+            total_time = time.time() - start_time
+            
+            return BatchResult(
+                count=total_processed,
+                valid_count=total_valid,
+                invalid_count=total_invalid,
+                processing_time=total_time,
+                average_time=total_time / total_processed if total_processed > 0 else 0,
+                results=all_results,
+                summary={"chunked": True, "chunks": (len(emails) // MAX_BATCH_SIZE) + 1}
+            )
 
         payload = {
             "emails": emails,
@@ -431,8 +295,13 @@ class MailSafePro:
             "concurrent_requests": concurrent_requests,
         }
 
-        data = self._make_request("POST", "/batch", json=payload)
-        return BatchResult.from_dict(data)
+        response = self._client.post(
+            "/batch",
+            json=payload,
+            headers=self._get_auth_headers()
+        )
+        data = self._handle_response(response)
+        return BatchResult.model_validate(data)
 
     def validate_file(
         self,
@@ -441,77 +310,243 @@ class MailSafePro:
         check_smtp: bool = False,
         include_raw_dns: bool = False,
     ) -> BatchResult:
-        """
-        Validate emails from CSV or TXT file
-
-        Args:
-            file_path: Path to CSV or TXT file
-            column: Column name for CSV files (optional, auto-detects if not provided)
-            check_smtp: Perform SMTP verification for all emails
-            include_raw_dns: Include raw DNS records in responses
-
-        Returns:
-            BatchResult object with validation results
-
-        Raises:
-            ValidationError: If file is invalid or too large
-            FileNotFoundError: If file doesn't exist
-            QuotaExceededError: If daily quota is exceeded
-
-        Examples:
-            >>> validator = MailSafePro(api_key="key_xxx")
-            >>> result = validator.validate_file("emails.csv", column="email")
-            >>> print(f"Processed: {result.count} emails")
-
-            >>> # TXT file (one email per line)
-            >>> result = validator.validate_file("emails.txt")
-        """
+        self._refresh_token_if_needed()
         file_path = validate_file_path(file_path)
-
-        # Prepare multipart form data
-        files = {"file": (file_path.name, open(file_path, "rb"))}
-
+        
         data_params = {
             "check_smtp": str(check_smtp).lower(),
             "include_raw_dns": str(include_raw_dns).lower(),
         }
-
         if column:
             data_params["column"] = column
 
-        try:
-            # Note: multipart/form-data doesn't need Content-Type header
-            headers = self._get_auth_headers()
-            headers.pop("Content-Type", None)  # Let requests set it
+        headers = self._get_auth_headers()
+        headers.pop("Content-Type", None)
 
-            response_data = self._make_request(
-                "POST",
+        with open(file_path, "rb") as f:
+            files = {"file": (file_path.name, f)}
+            response = self._client.post(
                 "/batch/upload",
-                files=files,
                 data=data_params,
-                headers=headers,
+                files=files,
+                headers=headers
             )
+            data = self._handle_response(response)
+            return BatchResult.model_validate(data)
 
-            return BatchResult.from_dict(response_data)
-
-        finally:
-            # Close file
-            files["file"][1].close()
+    def get_usage(self) -> UsageStats:
+        self._refresh_token_if_needed()
+        response = self._client.get(
+            "/usage",
+            headers=self._get_auth_headers()
+        )
+        data = self._handle_response(response)
+        return UsageStats.model_validate(data)
 
     def get_quota(self) -> Dict[str, Any]:
-        """
-        Get current API quota and usage
+        """Deprecated: Use get_usage() instead"""
+        logger.warning("get_quota() is deprecated, use get_usage() instead")
+        return self.get_usage().model_dump()
 
-        Returns:
-            Dictionary with quota information
 
-        Examples:
-            >>> validator = MailSafePro(api_key="key_xxx")
-            >>> quota = validator.get_quota()
-            >>> print(f"Used: {quota['used']}/{quota['limit']}")
-        """
-        return self._make_request("GET", "/usage")
+class AsyncMailSafePro(BaseClient):
+    """
+    Asynchronous MailSafePro Client
+    """
 
-    def __repr__(self) -> str:
-        auth_type = "JWT" if self._access_token else "API Key"
-        return f"<MailSafePro(auth={auth_type}, base_url={self.base_url})>"
+    def __init__(self, api_key: Optional[str] = None, **kwargs):
+        if "config" in kwargs:
+            super().__init__(kwargs["config"])
+        else:
+            clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
+            super().__init__(ClientConfig(api_key=api_key, **clean_kwargs))
+            
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=self.config.timeout,
+            transport=httpx.AsyncHTTPTransport(retries=self.config.max_retries),
+        )
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    async def close(self):
+        await self._client.aclose()
+
+    @classmethod
+    async def login(
+        cls,
+        username: str,
+        password: str,
+        base_url: Optional[str] = None,
+        **kwargs
+    ) -> "AsyncMailSafePro":
+        instance = cls(base_url=base_url, **kwargs)
+        try:
+            response = await instance._client.post(
+                "/auth/login",
+                json={"email": username, "password": password},
+            )
+            data = instance._handle_response(response)
+            
+            instance._access_token = data.get("access_token")
+            instance._refresh_token = data.get("refresh_token")
+            expires_in = data.get("expires_in", 900)
+            instance._token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)
+            
+            return instance
+        except Exception as e:
+            await instance.close()
+            request_id = getattr(e, "request_id", None)
+            raise AuthenticationError(f"Login failed: {str(e)}", request_id) from e
+
+    async def _refresh_token_if_needed(self):
+        if self._access_token and self._token_expires_at and datetime.now() >= self._token_expires_at:
+            if not self._refresh_token:
+                raise AuthenticationError("No refresh token available")
+            try:
+                response = await self._client.post(
+                    "/auth/refresh",
+                    headers={"Authorization": f"Bearer {self._refresh_token}"}
+                )
+                data = self._handle_response(response)
+                self._access_token = data.get("access_token")
+                self._refresh_token = data.get("refresh_token")
+                expires_in = data.get("expires_in", 900)
+                self._token_expires_at = datetime.now() + timedelta(seconds=expires_in - 60)
+            except Exception as e:
+                raise AuthenticationError(f"Token refresh failed: {str(e)}") from e
+
+    async def validate(
+        self,
+        email: str,
+        check_smtp: bool = False,
+        include_raw_dns: bool = False,
+        priority: str = "standard",
+    ) -> ValidationResult:
+        await self._refresh_token_if_needed()
+        validate_email_format(email)
+        
+        payload = {
+            "email": email,
+            "check_smtp": check_smtp,
+            "include_raw_dns": include_raw_dns,
+            "priority": priority,
+        }
+        
+        response = await self._client.post(
+            "/validate/email",
+            json=payload,
+            headers=self._get_auth_headers()
+        )
+        data = self._handle_response(response)
+        return ValidationResult.model_validate(data)
+
+    async def validate_batch(
+        self,
+        emails: List[str],
+        check_smtp: bool = False,
+        include_raw_dns: bool = False,
+        batch_size: int = 100,
+        concurrent_requests: int = 5,
+    ) -> BatchResult:
+        await self._refresh_token_if_needed()
+        if not emails:
+            raise ValidationError("Email list cannot be empty")
+
+        MAX_BATCH_SIZE = 10000
+        
+        # Auto-chunking logic
+        if len(emails) > MAX_BATCH_SIZE:
+            logger.info(f"Input list size ({len(emails)}) exceeds limit ({MAX_BATCH_SIZE}). Auto-chunking...")
+            all_results = []
+            total_processed = 0
+            total_valid = 0
+            total_invalid = 0
+            start_time = time.time()
+            
+            for chunk in self._chunk_list(emails, MAX_BATCH_SIZE):
+                chunk_result = await self.validate_batch(
+                    chunk, check_smtp, include_raw_dns, batch_size, concurrent_requests
+                )
+                all_results.extend(chunk_result.results)
+                total_processed += chunk_result.count
+                total_valid += chunk_result.valid_count
+                total_invalid += chunk_result.invalid_count
+                
+            total_time = time.time() - start_time
+            
+            return BatchResult(
+                count=total_processed,
+                valid_count=total_valid,
+                invalid_count=total_invalid,
+                processing_time=total_time,
+                average_time=total_time / total_processed if total_processed > 0 else 0,
+                results=all_results,
+                summary={"chunked": True, "chunks": (len(emails) // MAX_BATCH_SIZE) + 1}
+            )
+
+        payload = {
+            "emails": emails,
+            "check_smtp": check_smtp,
+            "include_raw_dns": include_raw_dns,
+            "batch_size": batch_size,
+            "concurrent_requests": concurrent_requests,
+        }
+
+        response = await self._client.post(
+            "/batch",
+            json=payload,
+            headers=self._get_auth_headers()
+        )
+        data = self._handle_response(response)
+        return BatchResult.model_validate(data)
+
+    async def validate_file(
+        self,
+        file_path: Union[str, Path],
+        column: Optional[str] = None,
+        check_smtp: bool = False,
+        include_raw_dns: bool = False,
+    ) -> BatchResult:
+        await self._refresh_token_if_needed()
+        file_path = validate_file_path(file_path)
+        
+        data_params = {
+            "check_smtp": str(check_smtp).lower(),
+            "include_raw_dns": str(include_raw_dns).lower(),
+        }
+        if column:
+            data_params["column"] = column
+
+        headers = self._get_auth_headers()
+        headers.pop("Content-Type", None)
+
+        with open(file_path, "rb") as f:
+            files = {"file": (file_path.name, f)}
+            response = await self._client.post(
+                "/batch/upload",
+                data=data_params,
+                files=files,
+                headers=headers
+            )
+            data = self._handle_response(response)
+            return BatchResult.model_validate(data)
+
+    async def get_usage(self) -> UsageStats:
+        await self._refresh_token_if_needed()
+        response = await self._client.get(
+            "/usage",
+            headers=self._get_auth_headers()
+        )
+        data = self._handle_response(response)
+        return UsageStats.model_validate(data)
+
+    async def get_quota(self) -> Dict[str, Any]:
+        """Deprecated: Use get_usage() instead"""
+        logger.warning("get_quota() is deprecated, use get_usage() instead")
+        usage = await self.get_usage()
+        return usage.model_dump()
