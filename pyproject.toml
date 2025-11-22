@@ -1,6 +1,6 @@
 [project]
 name = "mailsafepro-sdk"
-version = "1.0.2"
+version = "2.0.0"
 description = "Official Python SDK for Email Validation API with comprehensive security features"
 authors = [
     {name = "MailSafePro Team", email = "support@mailsafepro.com"}
@@ -25,8 +25,8 @@ classifiers = [
 ]
 requires-python = ">=3.8"
 dependencies = [
-    "requests>=2.32.4",
-    "urllib3>=2.0.0",
+    "httpx>=0.24.0",
+    "pydantic>=2.0.0",
 ]
 
 [project.urls]
