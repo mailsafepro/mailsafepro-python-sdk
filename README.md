@@ -12,26 +12,22 @@ Official Python SDK for the **MailSafePro Email Validation API** with comprehens
 
 ## ✨ Features
 
-- 🔐 **Dual Authentication**: API Key and JWT support
+- 🔐 **Dual Authentication**: API Key and JWT with auto-refresh
 - 📧 **Comprehensive Validation**: Format, DNS, SMTP, deliverability
 - 🚫 **Security Checks**: Spam trap, breach detection, disposable emails
 - 📊 **Batch Processing**: Validate up to 10,000 emails at once
 - ⚡ **Fast & Reliable**: Auto-retry with exponential backoff
-- 🎯 **Type Safe**: Full type hints for better IDE support
-- 📦 **Easy Integration**: Simple, intuitive API
+- 🎯 **Type Safe**: Full type hints (PEP 561 compliant)
+- 🛡️ **Security First**: Secure token storage, PII masking in logs
+- 📦 **Async Support**: Full async/await with `AsyncMailSafePro`
 
+## 🔒 Security Features (v2.1.0)
 
-## 🚀 Features
-
-- **Dual Authentication**: API Key (static) and JWT (dynamic with auto-refresh)
-- **Comprehensive Validation**: Format, DNS, SMTP, disposable detection
-- **Security Checks**: Spam trap detection, breach checking (HIBP), role email detection
-- **DNS Authentication**: SPF, DKIM, DMARC validation
-- **Batch Processing**: Validate thousands of emails efficiently
-- **File Upload**: Support for CSV/TXT files
-- **Type Hints**: Full type annotations for IDE autocompletion
-- **Automatic Retries**: Exponential backoff for rate limits and server errors
-- **Detailed Results**: Risk scores, quality scores, suggested actions
+- **SecureString**: API keys and tokens are wrapped to prevent accidental logging
+- **PII Masking**: Emails, passwords, and tokens are automatically masked in logs
+- **Request Tracking**: Every request gets a unique ID for debugging
+- **Rate Limit Awareness**: Client tracks limits and warns before hitting them
+- **Memory Protection**: Tokens are securely cleared on logout
 
 ## 📦 Installation
 

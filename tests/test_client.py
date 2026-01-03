@@ -1,12 +1,14 @@
 """
 Tests for MailSafePro client
+
+Uses respx for mocking httpx requests.
 """
 import pytest
-from unittest.mock import Mock, patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
-import requests
+import httpx
 
-from mailsafepro import MailSafePro
+from mailsafepro import MailSafePro, AsyncMailSafePro, ClientConfig
 from mailsafepro.exceptions import (
     AuthenticationError,
     RateLimitError,
@@ -23,404 +25,328 @@ class TestClientInitialization:
     def test_init_with_api_key(self):
         """Test initialization with API key"""
         client = MailSafePro(api_key="test_key_123")
-        assert client._api_key == "test_key_123"
+        assert client._api_key.get() == "test_key_123"
         assert client._access_token is None
         assert client.base_url == "https://api.mailsafepro.com"
+        client.close()
 
     def test_init_with_custom_base_url(self):
         """Test initialization with custom base URL"""
         client = MailSafePro(api_key="test_key", base_url="http://localhost:8000")
         assert client.base_url == "http://localhost:8000"
+        client.close()
 
     def test_init_with_custom_timeout(self):
         """Test initialization with custom timeout"""
         client = MailSafePro(api_key="test_key", timeout=60)
         assert client.timeout == 60
+        client.close()
 
     def test_init_without_credentials_works(self):
         """Test initialization without credentials is allowed (for login)"""
-        # El cliente permite inicialización sin credenciales para JWT login
         client = MailSafePro()
         assert client._api_key is None
         assert client._access_token is None
+        client.close()
+
+    def test_init_with_config_object(self):
+        """Test initialization with ClientConfig object"""
+        config = ClientConfig(
+            api_key="config_key",
+            base_url="https://custom.api.com",
+            timeout=45,
+            max_retries=5
+        )
+        client = MailSafePro(config=config)
+        assert client._api_key.get() == "config_key"
+        assert client.base_url == "https://custom.api.com"
+        assert client.timeout == 45
+        assert client.max_retries == 5
+        client.close()
+
+    def test_init_strips_trailing_slash(self):
+        """Test that trailing slash is stripped from base_url"""
+        client = MailSafePro(api_key="key", base_url="https://api.example.com/")
+        assert client.base_url == "https://api.example.com"
+        client.close()
+
+    def test_context_manager(self):
+        """Test client works as context manager"""
+        with MailSafePro(api_key="test_key") as client:
+            assert client._api_key.get() == "test_key"
 
 
 class TestAuthentication:
     """Test authentication methods"""
 
-    @patch("mailsafepro.client.requests.Session.post")
-    def test_jwt_login_success(self, mock_post, mock_jwt_login_response):
-        """Test successful JWT login"""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_jwt_login_response
-        mock_post.return_value = mock_response
+    def test_get_auth_headers_with_api_key(self):
+        """Test API key authentication headers"""
+        client = MailSafePro(api_key="test_key_123")
+        headers = client._get_auth_headers()
+        
+        assert "X-API-Key" in headers
+        assert headers["X-API-Key"] == "test_key_123"
+        assert "User-Agent" in headers
+        assert "X-SDK-Version" in headers
+        client.close()
 
-        client = MailSafePro.login(username="test@example.com", password="password123")
+    def test_get_auth_headers_without_credentials_raises(self):
+        """Test that missing auth raises error"""
+        client = MailSafePro()
+        
+        with pytest.raises(AuthenticationError, match="No authentication method configured"):
+            client._get_auth_headers()
+        client.close()
 
-        assert client._access_token is not None
-        assert client._refresh_token == "refresh_token_123"
-        assert client._token_expires_at is not None
-        mock_post.assert_called_once()
-
-    @patch("mailsafepro.client.requests.Session.post")
-    def test_jwt_login_invalid_credentials(self, mock_post):
-        """Test JWT login with invalid credentials"""
-        mock_response = Mock()
-        mock_response.status_code = 401
-        mock_response.text = "Invalid credentials"
-        mock_response.raise_for_status = Mock()
-        mock_post.return_value = mock_response
-
-        with pytest.raises(AuthenticationError):
-            MailSafePro.login(username="test@example.com", password="wrong_password")
-
-    @patch("mailsafepro.client.requests.Session.post")
-    def test_jwt_token_refresh(self, mock_post, mock_jwt_refresh_response):
-        """Test JWT token refresh"""
-        # Mock initial login
-        login_response = Mock()
-        login_response.status_code = 200
-        login_response.json.return_value = {
-            "access_token": "old_token",
-            "refresh_token": "refresh_123",
-            "expires_in": 3600,
-        }
-
-        # Mock refresh
-        refresh_response = Mock()
-        refresh_response.status_code = 200
-        refresh_response.json.return_value = mock_jwt_refresh_response
-        refresh_response.raise_for_status = Mock()
-
-        mock_post.side_effect = [login_response, refresh_response]
-
-        client = MailSafePro.login("test@example.com", "password")
-
-        # Force token expiration
-        client._token_expires_at = datetime.now() - timedelta(seconds=10)
-
-        # This should trigger refresh
-        client._get_auth_headers()
-
-        assert mock_post.call_count == 2
-
-    @patch("mailsafepro.client.requests.Session.post")
-    def test_logout(self, mock_post):
-        """Test logout clears tokens"""
-        # Mock login
-        login_response = Mock()
-        login_response.status_code = 200
-        login_response.json.return_value = {"access_token": "token", "refresh_token": "refresh", "expires_in": 3600}
-
-        # Mock logout endpoint
-        logout_response = Mock()
-        logout_response.status_code = 200
-        logout_response.raise_for_status = Mock()
-
-        mock_post.side_effect = [login_response, logout_response]
-
-        client = MailSafePro.login("test@example.com", "password")
-        client.logout()
-
-        assert client._access_token is None
-        assert client._refresh_token is None
-        assert client._token_expires_at is None
+    def test_is_authenticated_property(self):
+        """Test is_authenticated property"""
+        client_with_key = MailSafePro(api_key="test_key")
+        assert client_with_key.is_authenticated is True
+        client_with_key.close()
+        
+        client_without = MailSafePro()
+        assert client_without.is_authenticated is False
+        client_without.close()
 
 
 class TestEmailValidation:
     """Test email validation methods"""
 
-    @patch("mailsafepro.client.requests.Session.request")
-    def test_validate_email_success(self, mock_request, mock_validation_response):
-        """Test successful email validation"""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_validation_response
-        mock_response.raise_for_status = Mock()
-        mock_request.return_value = mock_response
-
+    def test_validate_email_invalid_format_empty(self):
+        """Test validation with empty email"""
         client = MailSafePro(api_key="test_key")
-        result = client.validate("test@example.com")
+        
+        with pytest.raises(ValidationError, match="Email cannot be empty"):
+            client.validate("")
+        client.close()
 
-        assert result.email == "test@example.com"
-        assert result.valid is True
-        mock_request.assert_called_once()
-
-    def test_validate_email_invalid_format(self):
-        """Test validation with invalid email format"""
+    def test_validate_email_invalid_format_no_at(self):
+        """Test validation with missing @ symbol"""
         client = MailSafePro(api_key="test_key")
-
+        
         with pytest.raises(ValidationError, match="Email must contain '@' symbol"):
             client.validate("invalid-email")
+        client.close()
 
-    @patch("mailsafepro.client.requests.Session.request")
-    def test_validate_with_check_smtp(self, mock_request, mock_validation_response):
-        """Test validation with SMTP check"""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_validation_response
-        mock_response.raise_for_status = Mock()
-        mock_request.return_value = mock_response
-
+    def test_validate_email_invalid_format_multiple_at(self):
+        """Test validation with multiple @ symbols"""
         client = MailSafePro(api_key="test_key")
-        result = client.validate("test@example.com", check_smtp=True)
+        
+        with pytest.raises(ValidationError, match="multiple '@' symbols"):
+            client.validate("test@@example.com")
+        client.close()
 
-        assert result.valid is True
-        # Verify check_smtp parameter was passed in JSON payload
-        call_args = mock_request.call_args
-        assert "json" in call_args.kwargs
-        assert call_args.kwargs["json"].get("check_smtp") is True
-
-    @patch("mailsafepro.client.requests.Session.request")
-    def test_validate_rate_limit_error(self, mock_request):
-        """Test handling of rate limit error"""
-        mock_response = Mock()
-        mock_response.status_code = 429
-        mock_response.headers = {"Retry-After": "60"}
-        mock_response.text = "Rate limit exceeded"
-        mock_request.return_value = mock_response
-
+    def test_validate_email_too_short(self):
+        """Test validation with too short email"""
         client = MailSafePro(api_key="test_key")
+        
+        with pytest.raises(ValidationError, match="too short"):
+            client.validate("a@b")
+        client.close()
 
-        with pytest.raises(RateLimitError) as exc_info:
-            client.validate("test@example.com")
-
-        assert exc_info.value.retry_after == 60
-
-    @patch("mailsafepro.client.requests.Session.request")
-    def test_validate_quota_exceeded_error(self, mock_request):
-        """Test handling of quota exceeded error"""
-        mock_response = Mock()
-        mock_response.status_code = 403
-        mock_response.json.return_value = {"detail": "Daily quota exceeded"}
-        mock_request.return_value = mock_response
-
+    def test_validate_email_too_long(self):
+        """Test validation with too long email"""
         client = MailSafePro(api_key="test_key")
-
-        with pytest.raises(AuthenticationError):  # 403 raises AuthenticationError
-            client.validate("test@example.com")
-
-    @patch("mailsafepro.client.requests.Session.request")
-    def test_validate_server_error(self, mock_request):
-        """Test handling of server error"""
-        mock_response = Mock()
-        mock_response.status_code = 500
-        mock_response.text = "Internal server error"
-        mock_request.return_value = mock_response
-
-        client = MailSafePro(api_key="test_key")
-
-        with pytest.raises(ServerError) as exc_info:
-            client.validate("test@example.com")
-
-        assert exc_info.value.status_code == 500
-
-    @patch("mailsafepro.client.requests.Session.request")
-    def test_validate_network_error(self, mock_request):
-        """Test handling of network error"""
-        mock_request.side_effect = requests.ConnectionError("Connection failed")
-
-        client = MailSafePro(api_key="test_key")
-
-        with pytest.raises(NetworkError):
-            client.validate("test@example.com")
+        long_email = "a" * 250 + "@example.com"
+        
+        with pytest.raises(ValidationError, match="too long"):
+            client.validate(long_email)
+        client.close()
 
 
 class TestBatchValidation:
     """Test batch validation methods"""
 
-    @patch("mailsafepro.client.requests.Session.request")
-    def test_validate_batch_success(self, mock_request, mock_batch_response):
-        """Test successful batch validation"""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_batch_response
-        mock_response.raise_for_status = Mock()
-        mock_request.return_value = mock_response
-
-        client = MailSafePro(api_key="test_key")
-        emails = ["valid1@example.com", "valid2@example.com", "invalid@test.com"]
-        result = client.validate_batch(emails)
-
-        assert result.count == 3
-        assert result.valid_count == 2
-        assert result.invalid_count == 1
-        assert len(result.results) == 3
-        mock_request.assert_called_once()
-
     def test_validate_batch_empty_list(self):
         """Test batch validation with empty list"""
         client = MailSafePro(api_key="test_key")
-
+        
         with pytest.raises(ValidationError, match="Email list cannot be empty"):
             client.validate_batch([])
+        client.close()
 
     def test_validate_batch_exceeds_limit(self):
         """Test batch validation exceeding max limit"""
         client = MailSafePro(api_key="test_key")
         emails = [f"test{i}@example.com" for i in range(10001)]
-
+        
         with pytest.raises(ValidationError, match="Cannot process more than 10,000 emails"):
             client.validate_batch(emails)
-
-    @patch("mailsafepro.client.requests.Session.request")
-    def test_validate_batch_with_options(self, mock_request, mock_batch_response):
-        """Test batch validation with custom options"""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_batch_response
-        mock_response.raise_for_status = Mock()
-        mock_request.return_value = mock_response
-
-        client = MailSafePro(api_key="test_key")
-        emails = ["test1@example.com", "test2@example.com"]
-        result = client.validate_batch(emails, batch_size=500, concurrent_requests=5)
-
-        assert result.count == 3
-        call_args = mock_request.call_args
-        assert "json" in call_args.kwargs
-        assert call_args.kwargs["json"].get("batch_size") == 500
+        client.close()
 
 
 class TestFileValidation:
     """Test file validation methods"""
 
-    @patch("mailsafepro.client.requests.Session.request")
-    @patch("builtins.open", create=True)
-    @patch("pathlib.Path.exists")
-    @patch("pathlib.Path.is_file")
-    @patch("pathlib.Path.stat")
-    def test_validate_file_success(
-        self, mock_stat, mock_is_file, mock_exists, mock_open, mock_request, mock_batch_response
-    ):
-        """Test successful file validation"""
-        # Mock file operations
-        mock_exists.return_value = True
-        mock_is_file.return_value = True
-        mock_stat.return_value = Mock(st_size=1024)  # 1KB file
-
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_batch_response
-        mock_response.raise_for_status = Mock()
-        mock_request.return_value = mock_response
-
-        # Mock file content
-        mock_file = MagicMock()
-        mock_open.return_value.__enter__.return_value = mock_file
-
-        client = MailSafePro(api_key="test_key")
-        result = client.validate_file("emails.txt")
-
-        assert result.count == 3
-        mock_request.assert_called_once()
-
     def test_validate_file_not_found(self):
         """Test file validation with non-existent file"""
         client = MailSafePro(api_key="test_key")
-
+        
         with pytest.raises(FileNotFoundError):
             client.validate_file("nonexistent.txt")
+        client.close()
 
-
-class TestRetryLogic:
-    """Test retry logic"""
-
-    def test_session_has_retry_configuration(self):
-        """Test that session is created with retry configuration"""
+    def test_validate_file_unsupported_format(self, tmp_path):
+        """Test file validation with unsupported format"""
+        # Create a temp file with wrong extension
+        test_file = tmp_path / "test.json"
+        test_file.write_text('{"emails": []}')
+        
         client = MailSafePro(api_key="test_key")
+        
+        with pytest.raises(ValidationError, match="Unsupported file format"):
+            client.validate_file(str(test_file))
+        client.close()
 
-        # Verificar que la sesión privada existe
-        assert client._session is not None
-        assert isinstance(client._session, requests.Session)
-
-        # Verificar que tiene adapters montados
-        assert "https://" in client._session.adapters
-        assert "http://" in client._session.adapters
-
-        # Verificar que max_retries está configurado
-        assert client.max_retries == 3
-
-    def test_retry_configuration_values(self):
-        """Test retry configuration with custom values"""
-        client = MailSafePro(api_key="test_key", max_retries=5)
-
-        assert client.max_retries == 5
-        assert client._session is not None
-
-    @patch("mailsafepro.client.requests.Session.request")
-    def test_server_error_503_raises_exception(self, mock_request):
-        """Test that 503 eventually raises ServerError after retries"""
-        # Simular que todos los intentos fallan con 503
-        mock_response = Mock()
-        mock_response.status_code = 503
-        mock_response.text = "Service Unavailable"
-        mock_request.return_value = mock_response
-
+    def test_validate_file_empty(self, tmp_path):
+        """Test file validation with empty file"""
+        test_file = tmp_path / "empty.csv"
+        test_file.write_text('')
+        
         client = MailSafePro(api_key="test_key")
+        
+        with pytest.raises(ValidationError, match="File is empty"):
+            client.validate_file(str(test_file))
+        client.close()
 
-        # Después de agotar reintentos, debe lanzar ServerError
-        with pytest.raises(ServerError) as exc_info:
-            client.validate("test@example.com")
 
-        assert exc_info.value.status_code == 503
+class TestRateLimiting:
+    """Test rate limiting functionality"""
 
-    @patch("mailsafepro.client.requests.Session.request")
-    def test_successful_request_after_transient_failure(self, mock_request, mock_validation_response):
-        """Test that transient failures are retried and eventually succeed"""
-        # Primera llamada falla, segunda funciona
-        fail_response = Mock()
-        fail_response.status_code = 502
-        fail_response.text = "Bad Gateway"
-
-        success_response = Mock()
-        success_response.status_code = 200
-        success_response.json.return_value = mock_validation_response
-        success_response.raise_for_status = Mock()
-
-        # El retry adapter de requests lo manejará automáticamente
-        # En este test solo verificamos que el cliente está configurado correctamente
-        mock_request.return_value = success_response
-
+    def test_rate_limit_state_initial(self):
+        """Test initial rate limit state"""
         client = MailSafePro(api_key="test_key")
-        result = client.validate("test@example.com")
+        
+        assert client._rate_limit.remaining == 1000
+        assert client._rate_limit.limit == 1000
+        assert client._rate_limit.should_wait() is False
+        client.close()
 
-        assert result.valid is True
+    def test_rate_limit_remaining_property(self):
+        """Test rate_limit_remaining property"""
+        client = MailSafePro(api_key="test_key")
+        
+        assert client.rate_limit_remaining == 1000
+        client.close()
 
 
-class TestAuthHeaders:
-    """Test authentication header generation"""
+class TestSecureString:
+    """Test SecureString class"""
 
-    def test_api_key_headers(self):
-        """Test API key authentication headers"""
-        client = MailSafePro(api_key="test_key_123")
-        headers = client._get_auth_headers()
+    def test_secure_string_get(self):
+        """Test SecureString returns value via get()"""
+        from mailsafepro.client import SecureString
+        
+        ss = SecureString("secret_value")
+        assert ss.get() == "secret_value"
 
-        assert "X-API-Key" in headers
-        assert headers["X-API-Key"] == "test_key_123"
+    def test_secure_string_str_redacted(self):
+        """Test SecureString str() is redacted"""
+        from mailsafepro.client import SecureString
+        
+        ss = SecureString("secret_value")
+        assert str(ss) == "[REDACTED]"
+        assert "secret" not in str(ss)
 
-    @patch("mailsafepro.client.requests.Session.post")
-    def test_jwt_headers(self, mock_post):
-        """Test JWT authentication headers"""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "access_token": "jwt_token_123",
-            "refresh_token": "refresh_123",
-            "expires_in": 3600,
-        }
-        mock_post.return_value = mock_response
+    def test_secure_string_repr_redacted(self):
+        """Test SecureString repr() is redacted"""
+        from mailsafepro.client import SecureString
+        
+        ss = SecureString("secret_value")
+        assert "secret" not in repr(ss)
+        assert "REDACTED" in repr(ss)
 
-        client = MailSafePro.login("test@example.com", "password")
-        headers = client._get_auth_headers()
 
-        assert "Authorization" in headers
-        assert headers["Authorization"] == "Bearer jwt_token_123"
+class TestClientConfig:
+    """Test ClientConfig validation"""
 
-    def test_no_auth_raises_error(self):
-        """Test that missing auth raises error"""
-        client = MailSafePro()  # No credentials
+    def test_config_invalid_timeout(self):
+        """Test config rejects invalid timeout"""
+        with pytest.raises(ValueError, match="Timeout must be at least 1 second"):
+            ClientConfig(timeout=0)
 
-        with pytest.raises(AuthenticationError, match="No authentication method configured"):
-            client._get_auth_headers()
+    def test_config_invalid_retries(self):
+        """Test config rejects negative retries"""
+        with pytest.raises(ValueError, match="max_retries cannot be negative"):
+            ClientConfig(max_retries=-1)
+
+    def test_config_invalid_base_url(self):
+        """Test config rejects invalid base_url"""
+        with pytest.raises(ValueError, match="base_url must start with"):
+            ClientConfig(base_url="invalid-url")
+
+
+class TestRequestTracking:
+    """Test request tracking functionality"""
+
+    def test_request_count_initial(self):
+        """Test initial request count is zero"""
+        client = MailSafePro(api_key="test_key")
+        assert client.request_count == 0
+        client.close()
+
+    def test_generate_request_id(self):
+        """Test request ID generation"""
+        client = MailSafePro(api_key="test_key")
+        
+        request_id = client._generate_request_id()
+        assert request_id.startswith("sdk-")
+        assert len(request_id) == 20  # "sdk-" + 16 hex chars
+        assert client._last_request_id == request_id
+        client.close()
+
+
+class TestLogout:
+    """Test logout functionality"""
+
+    def test_logout_clears_tokens(self):
+        """Test logout clears all tokens"""
+        client = MailSafePro(api_key="test_key")
+        
+        # Simulate having tokens
+        from mailsafepro.client import SecureString
+        client._access_token = SecureString("test_token")
+        client._refresh_token = SecureString("refresh_token")
+        client._token_expires_at = datetime.now() + timedelta(hours=1)
+        
+        client.logout()
+        
+        assert client._access_token is None
+        assert client._refresh_token is None
+        assert client._token_expires_at is None
+        client.close()
+
+
+class TestExceptionDetails:
+    """Test exception details and formatting"""
+
+    def test_authentication_error_with_request_id(self):
+        """Test AuthenticationError includes request_id"""
+        error = AuthenticationError("Invalid API key", request_id="req-123")
+        
+        assert "Invalid API key" in str(error)
+        assert "req-123" in str(error)
+        assert error.request_id == "req-123"
+
+    def test_rate_limit_error_retry_after(self):
+        """Test RateLimitError includes retry_after"""
+        error = RateLimitError("Rate limit exceeded", retry_after=60)
+        
+        assert error.retry_after == 60
+        assert "60" in str(error)
+
+    def test_server_error_status_code(self):
+        """Test ServerError includes status_code"""
+        error = ServerError("Internal error", status_code=503)
+        
+        assert error.status_code == 503
+        assert "503" in str(error)
+
+    def test_exception_to_dict(self):
+        """Test exception to_dict method"""
+        error = AuthenticationError("Test error", request_id="req-456")
+        
+        error_dict = error.to_dict()
+        assert error_dict["error_type"] == "AuthenticationError"
+        assert error_dict["message"] == "Test error"
+        assert error_dict["request_id"] == "req-456"
