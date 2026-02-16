@@ -493,7 +493,7 @@ class MailSafePro(BaseClient):
         }
         
         response = self._client.post(
-            "/v1/validate-email",
+            "/validate/email",
             json=payload,
             headers=self._get_auth_headers()
         )
@@ -800,7 +800,7 @@ class AsyncMailSafePro(BaseClient):
         }
         
         response = await self._client.post(
-            "/v1/validate-email",
+            "/validate/email",
             json=payload,
             headers=self._get_auth_headers()
         )

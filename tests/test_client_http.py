@@ -25,7 +25,7 @@ class TestValidateEmail:
     @respx.mock
     def test_validate_success(self, mock_validation_response):
         """Test successful email validation"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -40,7 +40,7 @@ class TestValidateEmail:
     @respx.mock
     def test_validate_with_smtp(self, mock_validation_response):
         """Test validation with SMTP check enabled"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -54,7 +54,7 @@ class TestValidateEmail:
     @respx.mock
     def test_validate_401_error(self):
         """Test validation with authentication error"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(401, json={"detail": "Invalid API key"})
         )
         
@@ -67,7 +67,7 @@ class TestValidateEmail:
     @respx.mock
     def test_validate_422_error(self):
         """Test validation with validation error"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(422, json={"detail": "Invalid email format"})
         )
         
@@ -80,7 +80,7 @@ class TestValidateEmail:
     @respx.mock
     def test_validate_429_rate_limit(self):
         """Test validation with rate limit error"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(
                 429, 
                 json={"detail": "Rate limit exceeded"},
@@ -99,7 +99,7 @@ class TestValidateEmail:
     @respx.mock
     def test_validate_500_server_error(self):
         """Test validation with server error"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(500, text="Internal Server Error")
         )
         
@@ -114,7 +114,7 @@ class TestValidateEmail:
     @respx.mock
     def test_validate_403_quota_exceeded(self):
         """Test validation with quota exceeded"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(403, json={"detail": "Daily quota exceeded"})
         )
         
@@ -260,7 +260,7 @@ class TestJWTAuthentication:
         respx.post("https://api.mailsafepro.com/auth/login").mock(
             return_value=httpx.Response(200, json=mock_jwt_login_response)
         )
-        route = respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        route = respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -300,7 +300,7 @@ class TestRateLimitTracking:
     @respx.mock
     def test_rate_limit_headers_tracked(self, mock_validation_response):
         """Test that rate limit headers are tracked"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(
                 200, 
                 json=mock_validation_response,
@@ -321,7 +321,7 @@ class TestRateLimitTracking:
     @respx.mock
     def test_request_count_incremented(self, mock_validation_response):
         """Test that request count is incremented"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -343,7 +343,7 @@ class TestAsyncClient:
     @respx.mock
     async def test_async_validate_success(self, mock_validation_response):
         """Test async email validation"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -426,7 +426,7 @@ class TestRequestHeaders:
     @respx.mock
     def test_api_key_header(self, mock_validation_response):
         """Test API key is sent in header"""
-        route = respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        route = respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -440,7 +440,7 @@ class TestRequestHeaders:
     @respx.mock
     def test_user_agent_header(self, mock_validation_response):
         """Test User-Agent header is sent"""
-        route = respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        route = respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -454,7 +454,7 @@ class TestRequestHeaders:
     @respx.mock
     def test_sdk_version_header(self, mock_validation_response):
         """Test SDK version header is sent"""
-        route = respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        route = respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -468,7 +468,7 @@ class TestRequestHeaders:
     @respx.mock
     def test_request_id_header(self, mock_validation_response):
         """Test request ID header is sent"""
-        route = respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        route = respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -723,7 +723,7 @@ class TestResponseHandling:
     @respx.mock
     def test_error_without_json(self):
         """Test error response without JSON body"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(500, text="Internal Server Error")
         )
         
@@ -736,7 +736,7 @@ class TestResponseHandling:
     @respx.mock
     def test_403_non_quota_error(self):
         """Test 403 error that's not quota related"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(403, json={"detail": "Access denied"})
         )
         
@@ -778,7 +778,7 @@ class TestRateLimitState:
     @respx.mock
     def test_rate_limit_check_raises(self, mock_validation_response):
         """Test rate limit check raises when limit reached"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -826,7 +826,7 @@ class TestCustomBaseUrl:
     @respx.mock
     def test_custom_base_url(self, mock_validation_response):
         """Test using custom base URL"""
-        respx.post("http://localhost:8000/v1/validate-email").mock(
+        respx.post("http://localhost:8000/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -842,7 +842,7 @@ class TestCustomBaseUrl:
     @respx.mock
     def test_custom_base_url_with_trailing_slash(self, mock_validation_response):
         """Test custom base URL with trailing slash is handled"""
-        respx.post("http://localhost:8000/v1/validate-email").mock(
+        respx.post("http://localhost:8000/validate/email").mock(
             return_value=httpx.Response(200, json=mock_validation_response)
         )
         
@@ -864,7 +864,7 @@ class TestAsyncEdgeCases:
     @respx.mock
     async def test_async_validate_error(self):
         """Test async validation error handling"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(401, json={"detail": "Unauthorized"})
         )
         
@@ -928,7 +928,7 @@ class TestValidationResponseParsing:
             "timestamp": "2025-01-03T12:00:00Z",
             "validation_id": "val_123",
         }
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(
                 200, 
                 json=mock_validation_response,
@@ -946,7 +946,7 @@ class TestValidationResponseParsing:
     @respx.mock
     def test_response_invalid_json_structure(self):
         """Test handling of invalid response structure"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(200, json={"invalid": "structure"})
         )
         
@@ -992,7 +992,7 @@ class TestExceptionChaining:
     @respx.mock
     def test_exception_has_request_id(self):
         """Test exceptions include request ID"""
-        respx.post("https://api.mailsafepro.com/v1/validate-email").mock(
+        respx.post("https://api.mailsafepro.com/validate/email").mock(
             return_value=httpx.Response(
                 401, 
                 json={"detail": "Invalid key"},
